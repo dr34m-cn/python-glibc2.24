@@ -49,6 +49,7 @@ jobs:
           file: dockerfiles/pip-req-${{ env.PLATFORM_PAIR }}.Dockerfile
           platforms: ${{ matrix.platform }}
           outputs: |
+            type=docker
             type=image,name=${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }},push-by-digest=true,name-canonical=true,push=true
 
       - name: 导出digest
@@ -63,16 +64,17 @@ jobs:
           name: digests-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/*
           retention-days: 1
-          
-      - name: 拉取刚构建的镜像
-        run: docker pull ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@${{ steps.build-image.outputs.digest }}
 
       - name: 从镜像中提取 wheels
         run: |
-          # 创建临时容器（无需运行）
-          docker create --name extract_${{ env.PLATFORM_PAIR }} ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@${{ steps.build-image.outputs.digest }}
+          # 创建临时容器（无需运行），直接使用 build-image 步骤输出的本地 imageid
+          # 加上 /bin/true 防止镜像默认 Entrypoint 导致创建报错
+          docker create --name extract_${{ env.PLATFORM_PAIR }} ${{ steps.build-image.outputs.imageid }} /bin/true
+          
           # 将容器内的 /wheels 拷贝到宿主机的 ./wheels_extracted 目录
           docker cp extract_${{ env.PLATFORM_PAIR }}:/wheels ./wheels_extracted
+          
+          # 清理临时容器
           docker rm extract_${{ env.PLATFORM_PAIR }}
 
       - name: 上传提取的 wheels 到 artifact
