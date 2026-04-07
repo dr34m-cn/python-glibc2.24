@@ -1,0 +1,31 @@
+windows: %cd%:/app
+
+armv7
+
+docker run -it --rm --name=armv7 -v "$(pwd)":/app -w /app dr34m/python_3.11.9_glibc_2.24@sha256:c229e61dc00d90ae4599acba194fd0e89ef069aca235c622eb98db87a2dca704 bash
+
+arm64
+
+docker run -it --rm --name=arm64 -v "$(pwd)":/app -w /app dr34m/python_3.11.9_glibc_2.24@sha256:8616ff2c281f278765190cfab549d4b71de37e1d018ee369de6ac568eb5c86eb bash
+
+amd64
+
+docker run -it --rm --name=amd64 -v "$(pwd)":/app -w /app dr34m/python_3.11.9_glibc_2.24@sha256:e81e5a033c54b5e197779587d2219a37536e80361078f27144c3b5ea8a2ba83f bash
+
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+
+pip install opencv-python-headless==4.7.0.72 --no-build-isolation
+pip install "setuptools<70.0.0" wheel "Cython>=0.29.33,<3"
+pip install "versioneer[toml]"
+pip install pandas==2.0.3 --no-build-isolation
+pip install staticx==0.14.1 --no-build-isolation
+
+
+#### 缓存
+pip freeze > requirements_cache.txt
+pip wheel -r requirements_cache.txt -w ./cache_wheels --find-links=./cache_wheels --prefer-binary
+
+pip wheel pandas==2.0.3 --no-build-isolation -w ./cache_wheels --find-links=./cache_wheels --prefer-binary
+
+## 使用缓存
+pip install --find-links=./cache_wheels --prefer-binary -r requirements.txt
