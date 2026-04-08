@@ -37,4 +37,5 @@ mutagen==1.47.0
 opencv-python-headless==4.7.0.72
 pandas==2.0.3
 ordered-set==4.1.0
+zstandard==0.25.0
 nuitka==2.8.10
