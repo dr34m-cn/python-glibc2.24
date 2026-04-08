@@ -67,14 +67,10 @@ jobs:
 
       - name: 从镜像中提取 wheels
         run: |
-          # 创建临时容器（无需运行），直接使用 build-image 步骤输出的本地 imageid
-          # 加上 /bin/true 防止镜像默认 Entrypoint 导致创建报错
           docker create --name extract_${{ env.PLATFORM_PAIR }} ${{ steps.build-image.outputs.imageid }} /bin/true
           
-          # 将容器内的 /wheels 拷贝到宿主机的 ./wheels_extracted 目录
           docker cp extract_${{ env.PLATFORM_PAIR }}:/wheels ./wheels_extracted
           
-          # 清理临时容器
           docker rm extract_${{ env.PLATFORM_PAIR }}
 
       - name: 上传提取的 wheels 到 artifact
@@ -130,10 +126,7 @@ jobs:
 
       - name: 整理并覆盖本地 wheels 目录
         run: |
-          # 清理旧的 wheels 防止多余废弃包残留
           rm -rf wheels/amd64/* wheels/arm64/* wheels/arm-v7/*
-          
-          # 确保目标目录存在
           mkdir -p wheels/amd64 wheels/arm64 wheels/arm-v7
           
           if [ -d "/tmp/wheels_downloads/wheels-linux-amd64" ]; then
