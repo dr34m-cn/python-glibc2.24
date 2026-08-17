@@ -9,7 +9,7 @@ imageio==2.37.3
 decorator==4.4.2
 tqdm==4.67.3
 moviepy==1.0.3
-pyinstaller==6.19.0
+pyinstaller==6.22.1
 tornado==6.5.5
 configparser==7.2.0
 paho-mqtt==1.6.1
