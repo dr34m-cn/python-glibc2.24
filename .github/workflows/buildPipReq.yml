@@ -44,6 +44,24 @@ jobs:
         run: |
           platform=${{ matrix.platform }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+          case "${platform}" in
+            linux/amd64) echo "WHEELS_DIR=amd64" >> $GITHUB_ENV ;;
+            linux/arm64) echo "WHEELS_DIR=arm64" >> $GITHUB_ENV ;;
+            linux/arm/v7) echo "WHEELS_DIR=arm-v7" >> $GITHUB_ENV ;;
+            *) echo "unknown platform ${platform}"; exit 1 ;;
+          esac
+
+      - name: 确认 wheels 缓存已就绪
+        run: |
+          set -eu
+          test -d "wheels/${WHEELS_DIR}"
+          count=$(find "wheels/${WHEELS_DIR}" -name '*.whl' | wc -l)
+          echo "wheels/${WHEELS_DIR}: ${count} files"
+          if [ "${count}" -lt "${{ env.MIN_WHEEL_COUNT }}" ]; then
+            echo "wheels cache missing or incomplete"
+            ls -la wheels || true
+            exit 1
+          fi
 
       - name: 设置QEMU
         uses: docker/setup-qemu-action@v3
@@ -61,6 +79,7 @@ jobs:
         name: 构建docker镜像
         uses: docker/build-push-action@v6
         with:
+          context: .
           file: dockerfiles/pip-req-${{ env.PLATFORM_PAIR }}.Dockerfile
           platforms: ${{ matrix.platform }}
           outputs: |
