@@ -3,11 +3,16 @@ name: 安装pip依赖
 on:
   push:
     branches: [ 'main' ]
-    paths: [ 'requirements.txt', '.github/workflows/buildPipReq.yml' ]
+    paths:
+      - 'requirements.txt'
+      - 'dockerfiles/**'
+      - '.github/workflows/buildPipReq.yml'
 
 env:
   DOCKER_USER: dr34m
   DOCKER_NAME: python_3.11.9_glibc_2.24
+  WHEELS_BRANCH: wheels
+  MIN_WHEEL_COUNT: 50
 
 jobs:
   build-docker:
@@ -24,6 +29,16 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+
+      - name: 从 wheels 分支检出缓存
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.WHEELS_BRANCH }}
+          path: wheels
+          persist-credentials: false
+
+      - name: 去掉 wheels 检出中的 .git
+        run: rm -rf wheels/.git
 
       - name: 替换平台名称中的斜杠为横杠
         run: |
@@ -52,6 +67,20 @@ jobs:
             type=docker
             type=image,name=${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }},push-by-digest=true,name-canonical=true,push=true
 
+      - name: 从镜像中提取 wheels
+        run: |
+          set -eu
+          docker create --name extract_${{ env.PLATFORM_PAIR }} ${{ steps.build-image.outputs.imageid }} /bin/true
+          docker cp extract_${{ env.PLATFORM_PAIR }}:/wheels ./wheels_extracted
+          docker rm extract_${{ env.PLATFORM_PAIR }}
+
+          count=$(find ./wheels_extracted -name '*.whl' | wc -l)
+          echo "extracted ${count} wheels for ${{ env.PLATFORM_PAIR }}"
+          if [ "${count}" -lt "${{ env.MIN_WHEEL_COUNT }}" ]; then
+            echo "refusing incomplete wheel cache: got ${count}, want at least ${{ env.MIN_WHEEL_COUNT }}"
+            exit 1
+          fi
+
       - name: 导出digest
         run: |
           mkdir -p /tmp/digests
@@ -65,14 +94,6 @@ jobs:
           path: /tmp/digests/*
           retention-days: 1
 
-      - name: 从镜像中提取 wheels
-        run: |
-          docker create --name extract_${{ env.PLATFORM_PAIR }} ${{ steps.build-image.outputs.imageid }} /bin/true
-          
-          docker cp extract_${{ env.PLATFORM_PAIR }}:/wheels ./wheels_extracted
-          
-          docker rm extract_${{ env.PLATFORM_PAIR }}
-
       - name: 上传提取的 wheels 到 artifact
         uses: actions/upload-artifact@v4
         with:
@@ -84,6 +105,7 @@ jobs:
     name: 合并镜像上传
     runs-on: ubuntu-latest
     needs: [build-docker]
+    if: ${{ !cancelled() && needs.build-docker.result == 'success' }}
     steps:
       - name: 下载digest
         uses: actions/download-artifact@v4
@@ -91,6 +113,16 @@ jobs:
           path: /tmp/digests
           pattern: digests-*
           merge-multiple: true
+
+      - name: 确认三个架构都构建成功
+        run: |
+          set -eu
+          count=$(find /tmp/digests -type f | wc -l)
+          echo "digest count: ${count}"
+          if [ "${count}" -ne 3 ]; then
+            echo "expected 3 platform digests before tagging pip-req, got ${count}"
+            exit 1
+          fi
 
       - name: 设置Docker BuildX
         uses: docker/setup-buildx-action@v3
@@ -105,18 +137,19 @@ jobs:
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create -t ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:pip-req $(printf '${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
-  
+
   commit-wheels:
     name: 提交提取的Wheels
     runs-on: ubuntu-latest
     needs: [build-docker]
+    if: ${{ !cancelled() && needs.build-docker.result == 'success' }}
     permissions:
       contents: write
     steps:
-      - name: 检出代码
+      - name: 检出 wheels 分支
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ env.WHEELS_BRANCH }}
 
       - name: 下载所有的 wheels artifacts
         uses: actions/download-artifact@v4
@@ -124,23 +157,35 @@ jobs:
           pattern: wheels-*
           path: /tmp/wheels_downloads
 
-      - name: 整理并覆盖本地 wheels 目录
+      - name: 整理并覆盖 wheels 分支缓存
         run: |
-          rm -rf wheels/amd64/* wheels/arm64/* wheels/arm-v7/*
-          mkdir -p wheels/amd64 wheels/arm64 wheels/arm-v7
-          
-          if [ -d "/tmp/wheels_downloads/wheels-linux-amd64" ]; then
-            cp -a /tmp/wheels_downloads/wheels-linux-amd64/. wheels/amd64/
-          fi
-          if [ -d "/tmp/wheels_downloads/wheels-linux-arm64" ]; then
-            cp -a /tmp/wheels_downloads/wheels-linux-arm64/. wheels/arm64/
-          fi
-          if [ -d "/tmp/wheels_downloads/wheels-linux-arm-v7" ]; then
-            cp -a /tmp/wheels_downloads/wheels-linux-arm-v7/. wheels/arm-v7/
-          fi
+          set -eu
+          mkdir -p amd64 arm64 arm-v7
 
-      - name: 提交并推送更改到仓库
+          replace_if_complete() {
+            src="$1"
+            dest="$2"
+            if [ ! -d "${src}" ]; then
+              echo "missing extracted wheels: ${src}"
+              exit 1
+            fi
+            count=$(find "${src}" -name '*.whl' | wc -l)
+            echo "${dest}: ${count} wheels"
+            if [ "${count}" -lt "${{ env.MIN_WHEEL_COUNT }}" ]; then
+              echo "refusing to overwrite ${dest}: only ${count} wheels"
+              exit 1
+            fi
+            rm -rf "${dest:?}/"*
+            cp -a "${src}/." "${dest}/"
+          }
+
+          replace_if_complete /tmp/wheels_downloads/wheels-linux-amd64 amd64
+          replace_if_complete /tmp/wheels_downloads/wheels-linux-arm64 arm64
+          replace_if_complete /tmp/wheels_downloads/wheels-linux-arm-v7 arm-v7
+
+      - name: 提交并推送到 wheels 分支
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(wheels): update cached wheels [skip ci]"
-          file_pattern: 'wheels/'
+          branch: wheels
+          commit_message: "chore(wheels): update cached wheels"
+          file_pattern: 'amd64/ arm64/ arm-v7/'
