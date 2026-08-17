@@ -26,6 +26,8 @@ onvif-zeep==0.2.12
 chardet==5.2.0
 bcrypt==3.2.2
 paramiko==3.4.1
+cryptography==46.0.6
+pyOpenSSL==26.0.0
 openpyxl==3.1.5
 PyYAML==6.0.3
 pysmb==1.2.13
